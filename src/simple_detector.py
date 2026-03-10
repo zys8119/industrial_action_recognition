@@ -44,8 +44,9 @@ class SimpleDetector:
         self.sift = cv2.SIFT_create()
         self.bf_matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
         
-        # 平滑
-        self.detection_history = deque(maxlen=5)
+        # 改进的平滑跟踪
+        self.detection_history = {}  # {label: deque of (bbox, confidence)}
+        self.smooth_window = 8  # 增加平滑窗口
     
     def detect(self, frame):
         """检测物体"""
@@ -91,12 +92,40 @@ class SimpleDetector:
                     if len(dst_pts) < 4:
                         continue
                     
-                    # 计算边界框
-                    xs = [p[0] for p in dst_pts]
-                    ys = [p[1] for p in dst_pts]
+                    # 使用凸包来计算更准确的边界
+                    dst_pts_array = np.array(dst_pts, dtype=np.float32)
+                    hull = cv2.convexHull(dst_pts_array)
                     
-                    x_min, x_max = int(min(xs)), int(max(xs))
-                    y_min, y_max = int(min(ys)), int(max(ys))
+                    # 计算凸包的边界框
+                    x_min = int(np.min(hull[:, 0, 0]))
+                    y_min = int(np.min(hull[:, 0, 1]))
+                    x_max = int(np.max(hull[:, 0, 0]))
+                    y_max = int(np.max(hull[:, 0, 1]))
+                    
+                    # 根据模板的长宽比调整边界框
+                    template_w, template_h = template['size']
+                    template_ratio = template_w / template_h if template_h > 0 else 1.0
+                    
+                    detected_w = x_max - x_min
+                    detected_h = y_max - y_min
+                    detected_ratio = detected_w / detected_h if detected_h > 0 else 1.0
+                    
+                    # 如果长宽比差异太大，调整边界框
+                    if abs(detected_ratio - template_ratio) > 0.5:
+                        # 保持中心点，按模板比例调整
+                        center_x = (x_min + x_max) // 2
+                        center_y = (y_min + y_max) // 2
+                        
+                        if detected_ratio > template_ratio:
+                            # 检测框太宽，调整宽度
+                            new_w = int(detected_h * template_ratio)
+                            x_min = center_x - new_w // 2
+                            x_max = center_x + new_w // 2
+                        else:
+                            # 检测框太高，调整高度
+                            new_h = int(detected_w / template_ratio)
+                            y_min = center_y - new_h // 2
+                            y_max = center_y + new_h // 2
                     
                     w = x_max - x_min
                     h = y_max - y_min
@@ -105,12 +134,15 @@ class SimpleDetector:
                     if w < 20 or h < 20 or w > frame.shape[1] * 0.8 or h > frame.shape[0] * 0.8:
                         continue
                     
-                    # 扩展边界框（增加一些边距）
-                    margin = 10
-                    x_min = max(0, x_min - margin)
-                    y_min = max(0, y_min - margin)
-                    x_max = min(frame.shape[1], x_max + margin)
-                    y_max = min(frame.shape[0], y_max + margin)
+                    # 添加适当的边距（根据模板大小）
+                    margin_ratio = 0.1  # 10% 边距
+                    margin_w = int(w * margin_ratio)
+                    margin_h = int(h * margin_ratio)
+                    
+                    x_min = max(0, x_min - margin_w)
+                    y_min = max(0, y_min - margin_h)
+                    x_max = min(frame.shape[1], x_max + margin_w)
+                    y_max = min(frame.shape[0], y_max + margin_h)
                     
                     w = x_max - x_min
                     h = y_max - y_min
@@ -128,10 +160,62 @@ class SimpleDetector:
         # NMS
         detections = self.nms(detections)
         
-        # 记录历史
-        self.detection_history.append(detections)
+        # 改进的平滑
+        detections = self.smooth_detections_v2(detections)
         
         return detections
+    
+    def smooth_detections_v2(self, detections):
+        """改进的平滑算法"""
+        smoothed = []
+        
+        for det in detections:
+            label = det['label']
+            bbox = det['bbox']
+            confidence = det['confidence']
+            
+            # 初始化历史
+            if label not in self.detection_history:
+                self.detection_history[label] = deque(maxlen=self.smooth_window)
+            
+            # 添加当前检测
+            self.detection_history[label].append((bbox, confidence))
+            
+            # 加权平均（置信度高的权重大）
+            history = list(self.detection_history[label])
+            
+            if len(history) > 0:
+                total_weight = 0
+                weighted_x = 0
+                weighted_y = 0
+                weighted_w = 0
+                weighted_h = 0
+                
+                for hist_bbox, hist_conf in history:
+                    weight = hist_conf  # 使用置信度作为权重
+                    total_weight += weight
+                    weighted_x += hist_bbox[0] * weight
+                    weighted_y += hist_bbox[1] * weight
+                    weighted_w += hist_bbox[2] * weight
+                    weighted_h += hist_bbox[3] * weight
+                
+                if total_weight > 0:
+                    smoothed_bbox = (
+                        int(weighted_x / total_weight),
+                        int(weighted_y / total_weight),
+                        int(weighted_w / total_weight),
+                        int(weighted_h / total_weight)
+                    )
+                    
+                    smoothed_det = det.copy()
+                    smoothed_det['bbox'] = smoothed_bbox
+                    smoothed.append(smoothed_det)
+                else:
+                    smoothed.append(det)
+            else:
+                smoothed.append(det)
+        
+        return smoothed
     
     def nms(self, detections, iou_threshold=0.5):
         """非极大值抑制"""
@@ -169,7 +253,7 @@ class SimpleDetector:
         
         return inter_area / union_area if union_area > 0 else 0
     
-    def draw_detections(self, frame, detections):
+    def draw_detections(self, frame, detections, show_details=True):
         """绘制检测结果"""
         for det in detections:
             x, y, w, h = det['bbox']
@@ -184,22 +268,37 @@ class SimpleDetector:
             else:
                 color = (0, 165, 255)
             
-            # 边界框
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
+            # 边界框（加粗）
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 4)
             
-            # 标签
+            # 中心十字线
+            center_x = x + w // 2
+            center_y = y + h // 2
+            cross_size = 10
+            cv2.line(frame, (center_x - cross_size, center_y), 
+                    (center_x + cross_size, center_y), color, 2)
+            cv2.line(frame, (center_x, center_y - cross_size), 
+                    (center_x, center_y + cross_size), color, 2)
+            
+            # 标签（更大更清晰）
             text = f"{label} {confidence:.0%}"
             (text_w, text_h), _ = cv2.getTextSize(
-                text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+                text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
             cv2.rectangle(frame, (x, y - text_h - 15), 
                          (x + text_w + 10, y), color, -1)
             cv2.putText(frame, text, (x + 5, y - 8),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
             
-            # 匹配点数
-            info = f"Matches: {det['matches']}"
-            cv2.putText(frame, info, (x, y + h + 25),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            if show_details:
+                # 尺寸信息
+                size_text = f"{w}x{h}px"
+                cv2.putText(frame, size_text, (x, y + h + 25),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                
+                # 匹配点数
+                matches_text = f"Matches: {det['matches']}"
+                cv2.putText(frame, matches_text, (x, y + h + 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         
         return frame
     
