@@ -1,2 +1,4 @@
 .DS_Store
 models/
+training_samples_preview/
+data/video_annotations/

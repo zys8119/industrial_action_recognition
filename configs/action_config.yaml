@@ -15,7 +15,7 @@ data:
 model:
   backbone: "ResNet50"
   pretrained: true
-  num_seg: 8 # 每个视频采样的帧数
+  num_seg: 60 # 每个视频采样的帧数
 
 # 训练配置
 train:
