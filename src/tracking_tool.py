@@ -28,14 +28,26 @@ class TrackedObject:
         
     def create_tracker(self, tracker_type):
         """创建OpenCV跟踪器"""
-        if tracker_type == 'CSRT':
-            return cv2.TrackerCSRT_create()
-        elif tracker_type == 'KCF':
-            return cv2.TrackerKCF_create()
-        elif tracker_type == 'MOSSE':
-            return cv2.legacy.TrackerMOSSE_create()
-        else:
-            return cv2.TrackerCSRT_create()
+        try:
+            # OpenCV 4.5.1+ 新API
+            if tracker_type == 'CSRT':
+                return cv2.legacy.TrackerCSRT_create()
+            elif tracker_type == 'KCF':
+                return cv2.legacy.TrackerKCF_create()
+            elif tracker_type == 'MOSSE':
+                return cv2.legacy.TrackerMOSSE_create()
+            else:
+                return cv2.legacy.TrackerCSRT_create()
+        except AttributeError:
+            # OpenCV 旧API
+            if tracker_type == 'CSRT':
+                return cv2.TrackerCSRT_create()
+            elif tracker_type == 'KCF':
+                return cv2.TrackerKCF_create()
+            elif tracker_type == 'MOSSE':
+                return cv2.TrackerMOSSE_create()
+            else:
+                return cv2.TrackerCSRT_create()
     
     def update(self, frame):
         """更新跟踪"""

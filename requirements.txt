@@ -1,6 +1,6 @@
 paddlepaddle>=2.5.0
 paddlepaddle-gpu>=2.5.0  # 如果有GPU
-opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0  # 包含跟踪器
 numpy>=1.24.0
 pillow>=10.0.0
 pyyaml>=6.0

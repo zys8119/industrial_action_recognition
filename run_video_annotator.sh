@@ -1,0 +1,31 @@
+#!/bin/bash
+# 视频自动标注工具启动脚本
+
+echo "🎬 视频自动标注工具"
+echo ""
+echo "✨ 功能："
+echo "   ✅ 手动框选物体"
+echo "   ✅ 自动跟踪标注"
+echo "   ✅ 录制带标注的视频"
+echo "   ✅ 导出每帧标注数据"
+echo ""
+echo "📋 使用流程："
+echo "   1. 用鼠标框选要跟踪的物体"
+echo "   2. 按空格开始录制"
+echo "   3. 物体移动时自动标注"
+echo "   4. 再按空格停止录制"
+echo ""
+echo "⌨️  快捷键："
+echo "   鼠标拖动    - 框选物体"
+echo "   SPACE       - 开始/停止录制"
+echo "   T           - 切换轨迹显示"
+echo "   I           - 切换ID显示"
+echo "   C           - 清除所有跟踪"
+echo "   D           - 删除最后一个"
+echo "   S           - 保存当前帧"
+echo "   Q           - 退出"
+echo ""
+
+cd "$(dirname "$0")"
+source venv/bin/activate
+python src/video_auto_annotator.py "$@"
